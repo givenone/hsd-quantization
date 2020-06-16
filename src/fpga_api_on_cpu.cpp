@@ -56,7 +56,7 @@ void quantize(float* input, char* quantized, int num_input, char bits_min, char 
 {
   for(int i = 0; i < num_input; i++)
   {
-    quantized[i] = 0; // TODO: convert floating point to quantized value
+    quantized[i] = (char) ((unsigned int)(input[i] / scale)); // TODO: convert floating point to quantized value
   }
 }
 
@@ -64,7 +64,7 @@ void dequantize(short* quantized, float* output, int num_output, char offset, fl
 {
   for(int i = 0; i < num_output; i++)
   {
-    output[i] = 0; // TODO: convert quantized value to floating point
+    output[i] = scale * ((float)quantized[i]); // TODO: convert quantized value to floating point
   }
 }
 
@@ -82,22 +82,23 @@ const float *FPGA::blockMV(Compute* comp)
     char act_bits_min = 0;
     char act_bits_max = (1<<(comp->act_bits-1))-1;
 
-    float act_scale = 0; // TODO calculate the scale factor
-    char act_offset = 0; // TODO calculate the zero-offset
+    float act_scale = (comp->act_min - comp->act_max) / act_bits_max; // TODO calculate the scale factor
+    char act_offset = (-1 * comp->act_min) / act_scale; // TODO calculate the zero-offset
     quantize(vec, qvec_, v_size_, act_bits_min, act_bits_max, act_offset, act_scale);
 
     char weight_bits_min = 0;
     char weight_bits_max = (1<<(comp->weight_bits-1))-1;
 
-    float weight_scale = 0; // TODO calculate the scale factor
-    char weight_offset = 0; // TODO calculate the zero-offset
+    float weight_scale = (comp->weight_max - comp->weight_min) / 127; // TODO calculate the scale factor
+    char weight_offset = (-1 * comp->weight_min) /weight_scale; // TODO calculate the zero-offset
     quantize(mat, qmat_, m_size_*v_size_, weight_bits_min, weight_bits_max, weight_offset, weight_scale);
 
+    //printf("%d %d, %f %d", act_bits_min, act_bits_max, act_scale, act_offset);
     for (int i = 0; i < m_size_; ++i)
     {
       qout_[i] = 0;
       for (int j = 0; j < v_size_; ++j)
-        qout_[i] += (qvec_[j]-act_offset) * (qmat_[v_size_ * i + j]-weight_offset);
+        qout_[i] += (qvec_[j]) * (qmat_[v_size_ * i + j]);
     }
 
     dequantize(qout_, out, m_size_, 0, act_scale*weight_scale);
@@ -131,22 +132,37 @@ void FPGA::largeMV(const float *large_mat, const float *input, float *output, in
   {
     for (int j = 0; j < num_input; j += v_size_)
     {
-      // 0) Initialize input vector
-      int block_row = min(m_size_, num_output - i);
-      int block_col = min(v_size_, num_input - j);
+        // 0) Initialize input vector		
+        int block_row = min(m_size_, num_output-i);
+        int block_col = min(v_size_, num_input-j);
 
-      // 1) Assign a vector
-      // IMPLEMENT THIS
+        // !) Assign a vector
+        /* IMPLEMENT */
+        memcpy(vec, input + j, sizeof(float) * block_col);
+        //if(block_col < v_size_) memset()
+        // 2) Assign a matrix
+        /* IMPLEMENT */
+        int k=0;
+        for(; k< block_row ; k++)
+        {
+            memcpy(mat+ v_size_* k, large_mat + (i+k) * num_input + j, sizeof(float) * block_col);
+            if(block_col < v_size_) memset(mat+ v_size_ * k + block_col, 0, sizeof(float) * (v_size_ - block_col));
+        }
+        if(k < m_size_)
+        {
+            for(int x = 0; x < m_size_ - k ; x++)
+            {
+                memset(mat+ v_size_ * ( k + x ), 0, sizeof(float) * v_size_);
+            }
+        }
+        // 3) Call a function `block_call() to execute MV multiplication
+        const float* ret = this->blockMV(comp);
 
-      // 2) Assign a matrix
-      // IMPLEMENT THIS
-
-      // 3) Call a function `blockMV() to execute MV multiplication
-      const float* ret = this->blockMV(comp);
-
-      // 4) Accumulate intermediate results
-      for (int row = 0; row < block_row; ++row)
-        output[i + row] += ret[row];
+        // 4) Accumulate intermediate results
+        for(int row = 0; row < block_row; ++row)
+        {
+            output[i + row] += ret[row];
+        }
     }
   }
 }
@@ -173,9 +189,46 @@ void FPGA::convLowering(const std::vector<std::vector<std::vector<std::vector<fl
   //int input_channel = inputs.size();
   int input_height = inputs[0].size();
   int input_width = inputs[0][0].size();
-
   // IMPLEMENT THIS
   // For example,
   // new_weights[0][0] = cnn_weights[0][0][0][0];
   // new_inputs[0][0] = inputs[0][0][0];
+    for(int c=0; c<conv_channel; c++)
+    {
+      // vector row new_weight[c] 
+      int cnt = 0;
+      for(int ic = 0; ic<input_channel; ic++)
+      {
+          for(int h=0; h<conv_height; h++)
+          {
+              for(int w=0; w<conv_width; w++)
+              {
+                  new_weights[c][cnt++] = (cnn_weights[c][ic][h][w]);
+              }
+          }
+      }
+    }
+
+  // first move row-wise  
+  int cnt = 0;
+  for(int y=0; y<input_height-conv_height+1; y++)
+  {
+      for(int x=0; x<input_width-conv_width+1; x++)
+      {
+          // input row new_input[cnt];
+          for(int ic=0; ic<input_channel; ic++)
+          {
+                for(int h=0; h<conv_height; h++)
+                {
+                    for(int w=0; w<conv_width; w++)
+                    {
+                        int idx = w + conv_width * h + (conv_width*conv_height) * ic;
+                        new_inputs[idx][cnt] = inputs[ic][h+y][w+x]; 
+                    }
+                }
+          }
+        cnt++;
+      }
+
+  }
 }
