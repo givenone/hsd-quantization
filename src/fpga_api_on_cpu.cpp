@@ -99,6 +99,7 @@ const float *FPGA::blockMV(Compute* comp)
       qout_[i] = 0;
       for (int j = 0; j < v_size_; ++j)
         qout_[i] += (qvec_[j]) * (qmat_[v_size_ * i + j]);
+      printf("%d ", qout_[i]);
     }
 
     dequantize(qout_, out, m_size_, 0, act_scale*weight_scale);
