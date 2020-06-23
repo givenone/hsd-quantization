@@ -83,20 +83,21 @@ void FPGA::largeMV(const float *large_mat, const float *input, float *output, in
   int *qlarge_mat = new int[num_input*num_output];
   int *qinput = new int[num_input];
   int *qoutput = new int[num_output];
+  int *int_output = new int[m_size_];
 
   // quantize
   int act_bits_min = 0;
   int act_bits_max = (1<<(comp->act_bits-1))-1;
 
   float act_scale = (comp->act_min - comp->act_max) / act_bits_max; // TODO calculate the scale factor
-  int act_offset = (int) (-1 * comp->act_min) / act_scale; // TODO calculate the zero-offset
+  int act_offset = (int) ((-1 * comp->act_min) / act_scale); // TODO calculate the zero-offset
   quantize(input, qinput, num_input, act_bits_min, act_bits_max, act_offset, act_scale);
 
   int weight_bits_min = 0;
   int weight_bits_max = (1<<(comp->weight_bits-1))-1;
 
     float weight_scale = (comp->weight_max - comp->weight_min) / 127; // TODO calculate the scale factor
-    int weight_offset = (int) (-1 * comp->weight_min) /weight_scale; // TODO calculate the zero-offset
+    int weight_offset = (int) ((-1 * comp->weight_min)/weight_scale); // TODO calculate the zero-offset
   quantize(large_mat, qlarge_mat, num_input*num_output, weight_bits_min, weight_bits_max, weight_offset, weight_scale);
 
   // 0) Initialize output vector
@@ -133,6 +134,14 @@ void FPGA::largeMV(const float *large_mat, const float *input, float *output, in
 
       // 3) Call a function `qblockMV() to execute MV multiplication
       const int* ret = this->qblockMV(comp);
+      
+        // for debugging
+        for (int i = 0; i < m_size_; ++i)
+        {
+            int_output[i] = 0;
+            for (int j = 0; j < v_size_; ++j)
+                int_output[i] += vec[j] * mat[v_size_ * i + j];
+        }
 
       // 4) Accumulate intermediate results
       for(int row = 0; row < block_row; ++row)

@@ -65,6 +65,7 @@ void dequantize(short* quantized, float* output, int num_output, char offset, fl
   for(int i = 0; i < num_output; i++)
   {
     output[i] = scale * ((float)quantized[i]); // TODO: convert quantized value to floating point
+    printf("%f ", output[i]);
   }
 }
 
